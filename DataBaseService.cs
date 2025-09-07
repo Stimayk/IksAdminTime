@@ -12,7 +12,11 @@ namespace IksAdminTime
 
         public DataBaseService(IIksAdminApi api)
         {
+            if (string.IsNullOrWhiteSpace(api.DbConnectionString))
+                throw new ArgumentException("Database connection string is null или пустая");
+
             _connectionString = api.DbConnectionString;
+
             ILoggerFactory loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
             _logger = loggerFactory.CreateLogger<DataBaseService>();
         }
@@ -21,7 +25,7 @@ namespace IksAdminTime
         {
             try
             {
-                await using MySqlConnection connection = await GetOpenConnectionAsync();
+                await using var connection = await GetOpenConnectionAsync();
                 await CreateTablesAsync(connection);
             }
             catch (Exception ex)
@@ -33,7 +37,9 @@ namespace IksAdminTime
 
         private async Task CreateTablesAsync(MySqlConnection connection)
         {
-            const string createTableQuery = @"
+            try
+            {
+                const string createTableQuery = @"
 CREATE TABLE IF NOT EXISTS `iks_admin_time` (
     `id` INT PRIMARY KEY AUTO_INCREMENT,
     `admin_id` VARCHAR(32) NOT NULL,
@@ -46,13 +52,17 @@ CREATE TABLE IF NOT EXISTS `iks_admin_time` (
     UNIQUE KEY `uk_admin_server` (`admin_id`, `server_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 
-            _ = await connection.ExecuteAsync(createTableQuery);
+                await connection.ExecuteAsync(createTableQuery);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create tables");
+                throw;
+            }
         }
 
         public async Task OnAdminConnect(ulong steamId, string name, int serverId)
         {
-            await using MySqlConnection connection = await GetOpenConnectionAsync();
-
             const string query = @"
 INSERT INTO `iks_admin_time` 
     (admin_id, admin_name, connect_time, server_id)
@@ -63,19 +73,22 @@ ON DUPLICATE KEY UPDATE
     connect_time = VALUES(connect_time),
     disconnect_time = -1;";
 
-            _ = await connection.ExecuteAsync(query, new
+            var parameters = new { SteamId = steamId, Name = name, Time = GetCurrentUnixTime(), ServerId = serverId };
+
+            try
             {
-                SteamId = steamId,
-                Name = name,
-                Time = GetCurrentUnixTime(),
-                ServerId = serverId
-            });
+                await using var connection = await GetOpenConnectionAsync();
+
+                await connection.ExecuteAsync(query, parameters);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to log admin connect for SteamID {steamId} on server {serverId}");
+            }
         }
 
         public async Task OnAdminDisconnect(string steamId, int serverId)
         {
-            await using MySqlConnection connection = await GetOpenConnectionAsync();
-
             const string query = @"
 UPDATE `iks_admin_time`
 SET 
@@ -86,35 +99,54 @@ WHERE
     AND server_id = @ServerId
     AND disconnect_time = -1;";
 
-            _ = await connection.ExecuteAsync(query, new
+            var parameters = new { SteamId = steamId, ServerId = serverId, Time = GetCurrentUnixTime() };
+
+            try
             {
-                SteamId = steamId,
-                ServerId = serverId,
-                Time = GetCurrentUnixTime()
-            });
+                await using var connection = await GetOpenConnectionAsync();
+
+                await connection.ExecuteAsync(query, parameters);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to log admin disconnect for SteamID {steamId} on server {serverId}");
+            }
         }
 
         public async Task AddSpectatorTimeAsync(string steamId, int serverId, int duration)
         {
-            await using MySqlConnection connection = await GetOpenConnectionAsync();
-
             const string query = @"
 UPDATE `iks_admin_time`
 SET spectator_time = spectator_time + @Duration
 WHERE admin_id = @SteamId AND server_id = @ServerId;";
 
-            _ = await connection.ExecuteAsync(query, new
+            var parameters = new { SteamId = steamId, ServerId = serverId, Duration = duration };
+
+            try
             {
-                SteamId = steamId,
-                ServerId = serverId,
-                Duration = duration
-            });
+                await using var connection = await GetOpenConnectionAsync();
+
+                await connection.ExecuteAsync(query, parameters);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to add spectator time for SteamID {steamId} on server {serverId}");
+            }
         }
 
         private async Task<MySqlConnection> GetOpenConnectionAsync()
         {
-            MySqlConnection connection = new(_connectionString);
-            await connection.OpenAsync();
+            var connection = new MySqlConnection(_connectionString);
+            try
+            {
+                await connection.OpenAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to open MySQL connection");
+                throw;
+            }
+
             return connection;
         }
 
