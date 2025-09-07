@@ -13,7 +13,7 @@ namespace IksAdminTime
         public DataBaseService(IIksAdminApi api)
         {
             if (string.IsNullOrWhiteSpace(api.DbConnectionString))
-                throw new ArgumentException("Database connection string is null или пустая");
+                throw new ArgumentException("Database connection string is null");
 
             _connectionString = api.DbConnectionString;
 

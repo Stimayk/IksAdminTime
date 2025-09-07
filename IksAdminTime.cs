@@ -13,16 +13,13 @@ namespace IksAdminTime
 
         public override string ModuleName => "[IKS] Admin Time";
         public override string ModuleAuthor => "E!N";
-        public override string ModuleVersion => "v1.1.0";
+        public override string ModuleVersion => "v1.1.1";
 
-        private readonly IIksAdminApi _adminApi = AdminModule.Api;
-        private int _serverId;
         private readonly ConcurrentDictionary<string, int> _spectatorJoinTime = new();
 
         public override void OnAllPluginsLoaded(bool hotReload)
         {
-            _serverId = _adminApi.ThisServer.Id;
-            _dataBaseService = new DataBaseService(_adminApi);
+            _dataBaseService = new DataBaseService(AdminModule.Api);
 
             try
             {
@@ -33,7 +30,7 @@ namespace IksAdminTime
                 Logger.LogError($"Database init failed: {ex.Message}");
             }
 
-            _adminApi.OnFullConnect += (steamId, ip) =>
+            AdminModule.Api.OnFullConnect += (steamId, ip) =>
             {
                 _ = OnFullConnect(steamId, ip);
             };
@@ -72,7 +69,7 @@ namespace IksAdminTime
                 if (_spectatorJoinTime.TryRemove(steamId, out int joinTime))
                 {
                     int duration = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds() - joinTime;
-                    _ = _dataBaseService!.AddSpectatorTimeAsync(steamId, _serverId, duration);
+                    _ = _dataBaseService!.AddSpectatorTimeAsync(steamId, AdminModule.Api.ThisServer.Id, duration);
                 }
             }
 
@@ -83,15 +80,15 @@ namespace IksAdminTime
         {
             try
             {
-                if (_dataBaseService == null || _adminApi == null)
+                if (_dataBaseService == null || AdminModule.Api == null)
                     return;
 
                 if (!ulong.TryParse(steamId, out ulong steamId64))
                     return;
 
-                if (_adminApi.ServerAdmins.TryGetValue(steamId64, out Admin? admin))
+                if (AdminModule.Api.ServerAdmins.TryGetValue(steamId64, out Admin? admin))
                 {
-                    await _dataBaseService.OnAdminConnect(steamId64, admin.CurrentName, _serverId);
+                    await _dataBaseService.OnAdminConnect(steamId64, admin.CurrentName, AdminModule.Api.ThisServer.Id);
                 }
             }
             catch (Exception ex)
@@ -116,12 +113,12 @@ namespace IksAdminTime
                 if (steamId == null)
                     return;
 
-                await _dataBaseService.OnAdminDisconnect(steamId, _serverId);
+                await _dataBaseService.OnAdminDisconnect(steamId, AdminModule.Api.ThisServer.Id);
 
                 if (_spectatorJoinTime.TryRemove(steamId, out int specJoinTime))
                 {
                     int duration = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds() - specJoinTime;
-                    await _dataBaseService.AddSpectatorTimeAsync(steamId, _serverId, duration);
+                    await _dataBaseService.AddSpectatorTimeAsync(steamId, AdminModule.Api.ThisServer.Id, duration);
                 }
             }
             catch (Exception ex)
